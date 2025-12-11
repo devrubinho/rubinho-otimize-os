@@ -465,9 +465,22 @@ safe_purge() {
         return 1
     fi
 
+    # Check macOS version compatibility
+    local macos_version=$(sw_vers -productVersion 2>/dev/null | cut -d. -f1,2)
+    if [[ -n "$macos_version" ]] && (( $(echo "$macos_version < 10.9" | bc -l 2>/dev/null || echo 0) )); then
+        print_error "purge command requires macOS 10.9 or later"
+        return 1
+    fi
+
+    # Check SIP status
+    check_sip_status
+
     if is_dry_run; then
         print_info "[DRY-RUN] Would execute: sudo purge"
         print_info "  This would clear inactive memory"
+        # Capture stats for dry-run display
+        get_memory_stats
+        display_memory_stats "Memory State (Before Purge - DRY RUN)" "before"
         return 0
     fi
 
@@ -480,23 +493,78 @@ safe_purge() {
         fi
     fi
 
+    # Capture memory stats before purge
+    print_info "Capturing memory state before purge..."
+    get_memory_stats
+    display_memory_stats "Memory State Before Purge" "before"
+
     print_info "Executing memory purge (this may take a moment)..."
 
-    # Execute purge with timeout (5 minutes max)
-    if timeout 300 sudo purge 2>/dev/null || sudo purge 2>/dev/null; then
-        print_success "Memory purge completed"
-        log_message "INFO" "Memory purge executed successfully"
+    # Execute purge with timeout protection (5 minutes max)
+    local purge_start=$(date +%s)
+    local purge_timeout=300
+
+    if command -v timeout >/dev/null 2>&1; then
+        if timeout $purge_timeout sudo purge 2>/dev/null; then
+            print_success "Memory purge completed"
+        else
+            local elapsed=$(($(date +%s) - purge_start))
+            if [[ $elapsed -ge $purge_timeout ]]; then
+                print_error "Memory purge timed out after ${purge_timeout} seconds"
+                log_message "ERROR" "Memory purge timed out"
+                return 1
+            else
+                print_error "Memory purge failed"
+                log_message "ERROR" "Memory purge failed"
+                return 1
+            fi
+        fi
+    else
+        # Fallback without timeout command
+        if sudo purge 2>/dev/null; then
+            print_success "Memory purge completed"
+        else
+            print_error "Memory purge failed"
+            log_message "ERROR" "Memory purge failed"
+            return 1
+        fi
+    fi
+
+    # Wait a moment for memory stats to stabilize
+    sleep 2
+
+    # Capture memory stats after purge
+    print_info "Capturing memory state after purge..."
+    get_memory_stats
+    display_memory_stats "Memory State After Purge" "after"
+
+    # Validate purge success
+    local freed_memory=$((MEM_FREE_AFTER - MEM_FREE_BEFORE))
+    local inactive_reduced=$((MEM_INACTIVE_BEFORE - MEM_INACTIVE_AFTER))
+
+    if [[ $freed_memory -gt 0 ]] || [[ $inactive_reduced -gt 0 ]]; then
+        if [[ $freed_memory -gt 0 ]]; then
+            print_success "Memory freed: ${freed_memory} MB"
+        fi
+        if [[ $inactive_reduced -gt 0 ]]; then
+            print_success "Inactive memory reduced: ${inactive_reduced} MB"
+        fi
+        log_message "INFO" "Memory purge executed successfully - Freed: ${freed_memory}MB, Inactive reduced: ${inactive_reduced}MB"
         return 0
     else
-        print_error "Memory purge failed or timed out"
-        log_message "ERROR" "Memory purge failed"
-        return 1
+        print_warning "Memory purge completed but no significant memory was freed"
+        print_info "  This may indicate the system already had minimal inactive memory"
+        log_message "WARN" "Memory purge completed but no significant memory freed"
+        return 0
     fi
 }
 
 # DNS cache flush
 flush_dns_cache() {
     print_info "=== DNS Cache Flush ==="
+
+    print_warning "Note: DNS cache flush may cause brief connectivity disruption"
+    print_info "  Active network connections may be temporarily interrupted"
 
     if is_dry_run; then
         print_info "[DRY-RUN] Would execute:"
@@ -518,19 +586,21 @@ flush_dns_cache() {
     # Flush Directory Services cache
     if sudo dscacheutil -flushcache 2>/dev/null; then
         print_debug "Directory Services cache flushed"
+        log_message "INFO" "Directory Services cache flushed"
     else
         print_warning "Failed to flush Directory Services cache"
+        log_message "WARN" "Directory Services cache flush failed"
     fi
 
-    # Restart mDNSResponder with retry
+    # Restart mDNSResponder with retry logic
     local retry_count=0
     local max_retries=3
+    local success=false
 
     while [[ $retry_count -lt $max_retries ]]; do
         if sudo killall -HUP mDNSResponder 2>/dev/null; then
-            print_success "DNS cache flushed successfully"
-            log_message "INFO" "DNS cache flushed"
-            return 0
+            success=true
+            break
         else
             retry_count=$((retry_count + 1))
             if [[ $retry_count -lt $max_retries ]]; then
@@ -540,9 +610,27 @@ flush_dns_cache() {
         fi
     done
 
-    print_warning "Failed to restart mDNSResponder after $max_retries attempts"
-    log_message "WARN" "mDNSResponder restart failed"
-    return 1
+    if [[ "$success" == "true" ]]; then
+        print_success "DNS cache flushed successfully"
+        log_message "INFO" "DNS cache flushed - mDNSResponder restarted"
+
+        # Optional DNS resolution test (informational only)
+        if command -v host >/dev/null 2>&1 || command -v nslookup >/dev/null 2>&1; then
+            print_debug "DNS resolution test: checking google.com..."
+            if host google.com >/dev/null 2>&1 || nslookup google.com >/dev/null 2>&1; then
+                print_debug "DNS resolution working correctly"
+            else
+                print_debug "DNS resolution test inconclusive (may be network issue)"
+            fi
+        fi
+
+        return 0
+    else
+        print_warning "Failed to restart mDNSResponder after $max_retries attempts"
+        print_info "  DNS cache may still be flushed, but mDNSResponder restart failed"
+        log_message "WARN" "mDNSResponder restart failed after $max_retries attempts"
+        return 1
+    fi
 }
 
 # Font cache clearing
@@ -551,23 +639,47 @@ clear_font_cache() {
 
     if is_dry_run; then
         print_info "[DRY-RUN] Would execute: atsutil databases -remove"
+        print_info "  This may require sudo on some macOS versions"
         return 0
     fi
 
     if ! command -v atsutil >/dev/null 2>&1; then
         print_warning "atsutil command not found. Skipping font cache clear."
+        print_info "  atsutil is typically available on macOS 10.5+"
+        log_message "WARN" "atsutil command not found, skipping font cache clear"
         return 1
     fi
 
     print_info "Clearing font cache..."
+    print_info "  Note: Fonts will be re-indexed on next use"
 
+    # Try without sudo first
     if atsutil databases -remove 2>/dev/null; then
         print_success "Font cache cleared"
-        log_message "INFO" "Font cache cleared"
+        log_message "INFO" "Font cache cleared successfully"
+        return 0
+    fi
+
+    # If that fails, try with sudo (some macOS versions require it)
+    print_debug "Attempting font cache clear with sudo..."
+
+    if ! sudo -n true 2>/dev/null; then
+        if ! sudo -v; then
+            print_warning "Font cache clear failed and sudo access unavailable"
+            print_info "  Font cache may require elevated privileges on this macOS version"
+            log_message "WARN" "Font cache clear failed - sudo access unavailable"
+            return 1
+        fi
+    fi
+
+    if sudo atsutil databases -remove 2>/dev/null; then
+        print_success "Font cache cleared (with sudo)"
+        log_message "INFO" "Font cache cleared successfully with sudo"
         return 0
     else
-        print_warning "Font cache clear failed (may require sudo on some macOS versions)"
-        log_message "WARN" "Font cache clear failed"
+        print_warning "Font cache clear failed even with sudo"
+        print_info "  This may be normal on some macOS versions or if fonts are in use"
+        log_message "WARN" "Font cache clear failed even with sudo"
         return 1
     fi
 }
@@ -656,35 +768,140 @@ clean_system_cache() {
     print_info "=== System Cache Cleaning ==="
 
     local system_cache_dir="/Library/Caches"
-    local preserved_caches=(
+
+    # Critical system caches to preserve
+    local preserve_list=(
         "com.apple.kext.caches"
         "com.apple.metal"
         "bootcaches"
+        "kernel"
+        "com.apple.ATS"
     )
 
     if is_dry_run; then
         print_info "[DRY-RUN] Would scan system cache directory: $system_cache_dir"
         print_info "  (Requires sudo privileges)"
+        print_info "  Would preserve critical caches: ${preserve_list[*]}"
         return 0
     fi
 
     # Check sudo
     if ! sudo -n true 2>/dev/null; then
         print_warning "Sudo access required for system cache cleaning. Skipping."
+        log_message "WARN" "System cache cleaning skipped - no sudo access"
         return 1
     fi
 
     if [[ ! -d "$system_cache_dir" ]]; then
-        print_warning "System cache directory not found"
+        print_warning "System cache directory not found: $system_cache_dir"
         return 1
     fi
 
-    print_warning "System cache cleaning is a sensitive operation"
-    print_info "Skipping system cache cleaning in basic implementation"
-    print_info "  (Critical system caches are preserved by default)"
+    print_warning "=========================================="
+    print_warning "WARNING: System cache deletion is IRREVERSIBLE"
+    print_warning "=========================================="
+    print_info ""
 
-    log_message "INFO" "System cache cleaning skipped (safety)"
-    return 0
+    # Safety check: never delete caches modified in last 7 days
+    local min_age_days=7
+    print_info "Safety: Only caches older than ${min_age_days} days will be considered"
+
+    local folders_processed=0
+    local folders_deleted=0
+    local folders_preserved=0
+    local total_freed_mb=0
+
+    print_info "Scanning system cache directory (requires sudo)..."
+    print_info ""
+
+    # Find cache folders (using sudo)
+    while IFS= read -r cache_folder; do
+        if [[ -z "$cache_folder" ]] || [[ ! -d "$cache_folder" ]]; then
+            continue
+        fi
+
+        folders_processed=$((folders_processed + 1))
+        local folder_name=$(basename "$cache_folder")
+
+        # Check if should preserve (critical caches)
+        local should_preserve=false
+        for preserve_item in "${preserve_list[@]}"; do
+            if [[ "$folder_name" == "$preserve_item" ]] || [[ "$folder_name" == *"$preserve_item"* ]]; then
+                should_preserve=true
+                break
+            fi
+        done
+
+        if [[ "$should_preserve" == "true" ]]; then
+            folders_preserved=$((folders_preserved + 1))
+            print_debug "Preserved (critical): $folder_name"
+            continue
+        fi
+
+        # Check modification time (must be older than min_age_days)
+        local cache_age_days=0
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            # macOS: use stat -f
+            local mtime=$(stat -f "%m" "$cache_folder" 2>/dev/null || echo "0")
+            local now=$(date +%s)
+            cache_age_days=$(( (now - mtime) / 86400 ))
+        else
+            # Fallback: use find
+            cache_age_days=$(find "$cache_folder" -maxdepth 0 -mtime +${min_age_days} 2>/dev/null | wc -l | tr -d ' ')
+        fi
+
+        if [[ $cache_age_days -lt $min_age_days ]]; then
+            folders_preserved=$((folders_preserved + 1))
+            print_debug "Preserved (recently modified, ${cache_age_days} days old): $folder_name"
+            continue
+        fi
+
+        # Calculate size
+        local size_str=$(sudo du -sh "$cache_folder" 2>/dev/null | awk '{print $1}' || echo "0")
+        local size_mb=$(sudo du -sm "$cache_folder" 2>/dev/null | awk '{print $1}' || echo "0")
+
+        # In aggressive mode, prompt for each cache
+        if [[ "$AGGRESSIVE" == "true" ]]; then
+            print_info "Delete system cache: $folder_name (${size_str}, ${cache_age_days} days old)? (y/N): "
+            read -r response
+            if [[ ! "$response" =~ ^[Yy]$ ]]; then
+                folders_preserved=$((folders_preserved + 1))
+                continue
+            fi
+        else
+            # Non-aggressive: skip system cache deletion for safety
+            folders_preserved=$((folders_preserved + 1))
+            print_debug "Skipped (use --aggressive to enable): $folder_name"
+            continue
+        fi
+
+        # Delete cache (with sudo)
+        if sudo rm -rf "$cache_folder" 2>/dev/null; then
+            print_success "Deleted: $folder_name (${size_str})"
+            log_message "INFO" "Deleted system cache: $folder_name (${size_str})"
+            total_freed_mb=$((total_freed_mb + size_mb))
+            folders_deleted=$((folders_deleted + 1))
+        else
+            print_warning "Failed to delete: $folder_name (may be locked or in use)"
+            log_message "WARN" "Failed to delete system cache: $folder_name"
+        fi
+    done < <(sudo find "$system_cache_dir" -maxdepth 1 -type d ! -path "$system_cache_dir" 2>/dev/null)
+
+    print_info ""
+    print_info "System Cache Summary:"
+    print_info "  Folders processed: $folders_processed"
+    print_info "  Folders deleted: $folders_deleted"
+    print_info "  Folders preserved: $folders_preserved"
+    if [[ $total_freed_mb -gt 0 ]]; then
+        print_success "  Space freed: ${total_freed_mb} MB"
+    fi
+    print_info ""
+
+    if [[ $folders_deleted -eq 0 ]] && [[ "$AGGRESSIVE" != "true" ]]; then
+        print_info "No system caches deleted (use --aggressive flag to enable)"
+    fi
+
+    log_message "INFO" "System cache cleaning completed - Processed: $folders_processed, Deleted: $folders_deleted, Preserved: $folders_preserved, Freed: ${total_freed_mb}MB"
 }
 
 # Show rollback warnings
