@@ -139,7 +139,11 @@ Description:
     1. Clean Memory Only
     2. Optimize CPU Only
     3. Combined Optimization (Memory + CPU)
-    4. Exit
+    4. View Logs
+    5. Performance Dashboard
+    6. Rollback System
+    7. Uninstall
+    8. Exit
 
 Examples:
     $0                  # Interactive mode
@@ -215,6 +219,42 @@ execute_script() {
     read -r
 }
 
+# Execute utility script
+execute_utility() {
+    local script_name="$1"
+    local script_path="${SCRIPT_DIR}/scripts/${script_name}"
+
+    # Validate script exists and is executable
+    if [[ ! -x "$script_path" ]]; then
+        print_error "Script not found or not executable: $script_path"
+        exit 2
+    fi
+
+    print_info ""
+    print_info "Executing: scripts/${script_name}"
+    print_info "=========================================="
+    print_info ""
+
+    # Execute script (utilities handle their own arguments)
+    set +e  # Disable exit on error for menu loop
+    bash "$script_path" "${@:2}"
+    local exit_code=$?
+    set -e  # Re-enable exit on error
+
+    print_info ""
+    print_info "=========================================="
+
+    if [[ $exit_code -eq 0 ]]; then
+        print_success "Operation completed successfully!"
+    else
+        print_error "Operation failed with exit code: $exit_code"
+    fi
+
+    print_info ""
+    print_info "Press Enter to continue..."
+    read -r
+}
+
 # Interactive menu
 show_menu() {
     while true; do
@@ -235,7 +275,19 @@ show_menu() {
         print_info "3) Combined Optimization (Memory + CPU)"
         print_info "   - Full system optimization with progress reporting"
         print_info ""
-        print_info "4) Exit"
+        print_info "4) View Logs"
+        print_info "   - Browse and filter optimization logs"
+        print_info ""
+        print_info "5) Performance Dashboard"
+        print_info "   - Real-time system metrics and statistics"
+        print_info ""
+        print_info "6) Rollback System"
+        print_info "   - Restore system from previous snapshot"
+        print_info ""
+        print_info "7) Uninstall"
+        print_info "   - Remove all installed components"
+        print_info ""
+        print_info "8) Exit"
         print_info ""
 
         # Check sudo warning
@@ -253,8 +305,8 @@ show_menu() {
             print_info ""
         fi
 
-        PS3="Select an option (1-4): "
-        select choice in "Clean Memory Only" "Optimize CPU Only" "Combined Optimization (Memory + CPU)" "Exit"; do
+        PS3="Select an option (1-8): "
+        select choice in "Clean Memory Only" "Optimize CPU Only" "Combined Optimization (Memory + CPU)" "View Logs" "Performance Dashboard" "Rollback System" "Uninstall" "Exit"; do
             case $REPLY in
                 1)
                     execute_script "clean-memory.sh"
@@ -269,11 +321,27 @@ show_menu() {
                     break
                     ;;
                 4)
+                    execute_utility "view-logs.sh"
+                    break
+                    ;;
+                5)
+                    execute_utility "dashboard.sh"
+                    break
+                    ;;
+                6)
+                    execute_utility "rollback.sh"
+                    break
+                    ;;
+                7)
+                    execute_utility "uninstall.sh"
+                    break
+                    ;;
+                8)
                     print_info "Exiting..."
                     exit 0
                     ;;
                 *)
-                    print_error "Invalid selection. Please choose 1-4."
+                    print_error "Invalid selection. Please choose 1-8."
                     sleep 1
                     break
                     ;;

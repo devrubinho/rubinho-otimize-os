@@ -10,8 +10,13 @@ if [[ -n ${NOTIFICATIONS_SH_LOADED:-} ]]; then
 fi
 readonly NOTIFICATIONS_SH_LOADED=1
 
-# Configuration file path
-CONFIG_FILE="${SCRIPT_DIR:-.}/config/optimize.conf"
+# Configuration file path (relative to project root)
+# When sourced from scripts/, go up one level to find config
+PROJECT_ROOT="${SCRIPT_DIR:-.}"
+if [[ "$PROJECT_ROOT" == *"/scripts" ]]; then
+    PROJECT_ROOT="${PROJECT_ROOT%/scripts}"
+fi
+CONFIG_FILE="${PROJECT_ROOT}/config/optimize.conf"
 
 # Load configuration
 load_config() {
@@ -296,7 +301,7 @@ generate_summary() {
     local warnings="${5:-0}"
 
     local summary=""
-    
+
     # Format memory freed
     local memory_str=""
     if [[ $memory_freed -gt 1024 ]]; then
@@ -317,7 +322,7 @@ generate_summary() {
 
     # Build summary
     summary="Freed ${memory_str} in ${duration_str}"
-    
+
     if [[ "$status" == "success" ]]; then
         summary="${summary}. Completed successfully."
     else
@@ -448,4 +453,3 @@ test_notifications() {
     echo ""
     echo "Notification tests completed"
 }
-
