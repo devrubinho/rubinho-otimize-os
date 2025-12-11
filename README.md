@@ -40,21 +40,17 @@ git clone https://github.com/yourusername/rubinho-otimize-os.git
 cd rubinho-otimize-os
 ```
 
-2. Run the installation script:
+2. Run the main script (setup is automatic):
 ```bash
-./install.sh
+bash run.sh
 ```
 
-3. Set executable permissions (if needed):
-```bash
-chmod +x mac/*.sh linux/*.sh install.sh
-```
+The script will automatically:
+- Detect your operating system (macOS or Linux)
+- Run setup if needed (creates directories, sets permissions)
+- Show an interactive menu with all available options
 
-4. Verify installation:
-```bash
-./mac/optimize-all.sh --help
-./linux/optimize-all.sh --help
-```
+That's it! No manual setup required.
 
 ## Usage
 
@@ -315,21 +311,17 @@ git clone https://github.com/yourusername/rubinho-otimize-os.git
 cd rubinho-otimize-os
 ```
 
-2. Execute o script de instalação:
+2. Execute o script principal (a configuração é automática):
 ```bash
-./install.sh
+bash run.sh
 ```
 
-3. Defina permissões de execução (se necessário):
-```bash
-chmod +x mac/*.sh linux/*.sh install.sh
-```
+O script irá automaticamente:
+- Detectar seu sistema operacional (macOS ou Linux)
+- Executar a configuração se necessário (cria diretórios, define permissões)
+- Mostrar um menu interativo com todas as opções disponíveis
 
-4. Verifique a instalação:
-```bash
-./mac/optimize-all.sh --help
-./linux/optimize-all.sh --help
-```
+Pronto! Nenhuma configuração manual necessária.
 
 ## Uso
 

@@ -51,6 +51,44 @@ print_info() {
     echo -e "$1"
 }
 
+# Check if setup is needed
+check_setup() {
+    local needs_setup=false
+
+    # Check if required directories exist
+    if [[ ! -d "${SCRIPT_DIR}/mac" ]] || [[ ! -d "${SCRIPT_DIR}/linux" ]] || \
+       [[ ! -d "${SCRIPT_DIR}/lib" ]] || [[ ! -d "${SCRIPT_DIR}/config" ]]; then
+        needs_setup=true
+    fi
+
+    # Check if scripts are executable
+    if [[ -f "${SCRIPT_DIR}/mac/clean-memory.sh" ]] && [[ ! -x "${SCRIPT_DIR}/mac/clean-memory.sh" ]]; then
+        needs_setup=true
+    fi
+
+    if [[ "$needs_setup" == "true" ]]; then
+        print_info "First-time setup detected. Running installation..."
+        print_info ""
+
+        local install_script="${SCRIPT_DIR}/scripts/install.sh"
+        if [[ -f "$install_script" ]] && [[ -x "$install_script" ]]; then
+            bash "$install_script"
+            local install_exit=$?
+            if [[ $install_exit -ne 0 ]]; then
+                print_error "Installation failed. Please run: bash scripts/install.sh"
+                exit 2
+            fi
+            print_info ""
+            print_success "Setup completed successfully!"
+            print_info ""
+        else
+            print_error "Install script not found: $install_script"
+            print_info "Please run: bash scripts/install.sh"
+            exit 2
+        fi
+    fi
+}
+
 # Detect OS
 detect_os() {
     OS_TYPE=$(uname -s)
@@ -354,6 +392,9 @@ show_menu() {
 main() {
     # Parse arguments
     parse_arguments "$@"
+
+    # Check and run setup if needed
+    check_setup
 
     # Detect OS
     detect_os
