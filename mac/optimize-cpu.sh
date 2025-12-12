@@ -373,7 +373,7 @@ optimize_unified_logs() {
     # Try to optimize unified logs - this is optional, so don't fail if it doesn't work
     # The log command syntax varies by macOS version, so we try multiple approaches
     local success=false
-    
+
     # Try method 1: log erase with TTL (macOS 10.12+)
     if sudo log erase --ttl 30d 2>/dev/null; then
         success=true
@@ -393,7 +393,7 @@ optimize_unified_logs() {
         print_warning "Could not optimize unified logs (optional feature, safe to skip)"
         log_message "WARN" "Unified log optimization skipped (command syntax may vary by macOS version)"
     fi
-    
+
     return 0  # Always return success since this is optional
 }
 
