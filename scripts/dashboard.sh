@@ -107,15 +107,17 @@ get_top_memory_processes() {
     # ps aux columns: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
     # We want %MEM (col 4) and COMMAND (col 11+)
     ps aux | awk 'NR>1 {
-        mem_pct = $4
-        mem_kb = $6
+        mem_kb = $6  # RSS in KB
         # Command starts at column 11, join all remaining columns
         cmd = $11
         for (i=12; i<=NF; i++) cmd = cmd " " $i
         # Truncate long command names
         if (length(cmd) > 38) cmd = substr(cmd, 1, 35) "..."
-        printf "%-40s %8.1f MB\n", cmd, mem_kb/1024
-    }' | sort -rnk2 | head -20
+        # Output: memory_mb cmd_name (for sorting)
+        printf "%10.1f %-40s\n", mem_kb/1024, cmd
+    }' | sort -rn | head -20 | awk '{
+        printf "%-40s %8.1f MB\n", substr($0, 12), $1
+    }'
 }
 
 get_top_cpu_processes() {
@@ -129,8 +131,11 @@ get_top_cpu_processes() {
         for (i=12; i<=NF; i++) cmd = cmd " " $i
         # Truncate long command names
         if (length(cmd) > 38) cmd = substr(cmd, 1, 35) "..."
-        printf "%-40s %6.1f%%\n", cmd, cpu_pct
-    }' | sort -rnk2 | head -20
+        # Output: cpu_pct cmd_name (for sorting)
+        printf "%6.1f %-40s\n", cpu_pct, cmd
+    }' | sort -rn | head -20 | awk '{
+        printf "%-40s %6.1f%%\n", substr($0, 9), $1
+    }'
 }
 
 draw_bar() {
