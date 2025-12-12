@@ -92,23 +92,22 @@ log_message() {
         echo "$log_entry" >> "$LOG_FILE" 2>/dev/null || true
     fi
 
-    # Also write to console unless --quiet
-    if [[ "$QUIET" != "true" ]] && [[ "$level" != "DEBUG" ]] || [[ "$VERBOSE" == "true" ]]; then
-        # Color code based on level
+    # Write directly to console to avoid recursion (don't call print_* functions)
+    # The print_* functions call log_message, which would create infinite recursion
+    if [[ "$QUIET" != "true" ]] && ([[ "$level" != "DEBUG" ]] || [[ "$VERBOSE" == "true" ]]); then
+        # Color code based on level (direct echo, no function calls)
         case "$level" in
             ERROR)
-                print_error "$message"
+                echo -e "${COLOR_RED}✗${COLOR_RESET} $message" >&2
                 ;;
             WARN)
-                print_warning "$message"
+                echo -e "${COLOR_YELLOW}⚠${COLOR_RESET} $message"
                 ;;
             SUCCESS)
-                print_success "$message"
+                echo -e "${COLOR_GREEN}✓${COLOR_RESET} $message"
                 ;;
             INFO|DEBUG)
-                if [[ "$VERBOSE" == "true" ]] || [[ "$level" == "INFO" ]]; then
-                    print_info "$message"
-                fi
+                echo -e "$message"
                 ;;
         esac
     fi
