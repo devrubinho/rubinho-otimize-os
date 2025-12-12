@@ -74,24 +74,63 @@ get_memory_stats() {
     fi
 }
 
-get_cpu_load() {
+get_cpu_usage() {
+    # Get overall CPU usage percentage
     if [[ "$(uname -s)" == "Darwin" ]]; then
-        sysctl -n vm.loadavg | awk '{print $1, $2, $3}'
+        # macOS: use top command to get CPU usage
+        local cpu_line=$(top -l 1 | grep "CPU usage" 2>/dev/null)
+        if [[ -n "$cpu_line" ]]; then
+            # Extract user + sys percentage (e.g., "CPU usage: 5.23% user, 2.45% sys")
+            local user_cpu=$(echo "$cpu_line" | awk '{print $3}' | sed 's/%//' | cut -d. -f1)
+            local sys_cpu=$(echo "$cpu_line" | awk '{print $5}' | sed 's/%//' | cut -d. -f1)
+            local total_cpu=$((user_cpu + sys_cpu))
+            echo "$total_cpu"
+        else
+            echo "0"
+        fi
     else
-        cat /proc/loadavg | awk '{print $1, $2, $3}'
+        # Linux: calculate from top command
+        local cpu_line=$(top -bn1 | grep "Cpu(s)" 2>/dev/null)
+        if [[ -n "$cpu_line" ]]; then
+            # Extract CPU usage (100 - idle), get integer part
+            local idle=$(echo "$cpu_line" | awk -F'id,' '{print $1}' | awk '{print $NF}' | sed 's/%//' | cut -d. -f1)
+            local cpu_usage=$((100 - idle))
+            echo "$cpu_usage"
+        else
+            echo "0"
+        fi
     fi
 }
 
-get_disk_usage() {
-    df -h / | tail -1 | awk '{print $5}' | sed 's/%//'
+get_top_memory_processes() {
+    # Get top 20 processes by memory usage
+    # ps aux columns: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
+    # We want %MEM (col 4) and COMMAND (col 11+)
+    ps aux | awk 'NR>1 {
+        mem_pct = $4
+        mem_kb = $6
+        # Command starts at column 11, join all remaining columns
+        cmd = $11
+        for (i=12; i<=NF; i++) cmd = cmd " " $i
+        # Truncate long command names
+        if (length(cmd) > 38) cmd = substr(cmd, 1, 35) "..."
+        printf "%-40s %8.1f MB\n", cmd, mem_kb/1024
+    }' | sort -rnk2 | head -20
 }
 
-get_uptime() {
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        uptime | sed 's/.*up \([^,]*\),.*/\1/'
-    else
-        uptime -p 2>/dev/null || uptime | sed 's/.*up \([^,]*\),.*/\1/'
-    fi
+get_top_cpu_processes() {
+    # Get top 20 processes by CPU usage
+    # ps aux columns: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
+    # We want %CPU (col 3) and COMMAND (col 11+)
+    ps aux | awk 'NR>1 {
+        cpu_pct = $3
+        # Command starts at column 11, join all remaining columns
+        cmd = $11
+        for (i=12; i<=NF; i++) cmd = cmd " " $i
+        # Truncate long command names
+        if (length(cmd) > 38) cmd = substr(cmd, 1, 35) "..."
+        printf "%-40s %6.1f%%\n", cmd, cpu_pct
+    }' | sort -rnk2 | head -20
 }
 
 draw_bar() {
@@ -119,23 +158,11 @@ display_dashboard() {
     clear 2>/dev/null || true
 
     local os_type=$(detect_os)
-    local hostname=$(hostname 2>/dev/null || echo "unknown")
-    local uptime=$(get_uptime)
     local date_time=$(date '+%Y-%m-%d %H:%M:%S')
-    local os_version=""
-
-    if [[ "$os_type" == "macOS" ]]; then
-        os_version=$(sw_vers -productVersion 2>/dev/null || echo "unknown")
-    else
-        os_version=$(cat /etc/os-release 2>/dev/null | grep VERSION_ID | cut -d'"' -f2 || echo "unknown")
-    fi
 
     # Header
     echo -e "${COLOR_BOLD}${COLOR_CYAN}OS Optimization Dashboard${COLOR_RESET}"
     echo "=========================================="
-    echo "Hostname: $hostname"
-    echo "OS: $os_type $os_version"
-    echo "Uptime: $uptime"
     echo "Time: $date_time"
     echo "=========================================="
     echo ""
@@ -145,56 +172,45 @@ display_dashboard() {
     local mem_total=$(echo "$mem_stats" | awk '{print $1}')
     local mem_used=$(echo "$mem_stats" | awk '{print $2}')
     local mem_free=$(echo "$mem_stats" | awk '{print $3}')
+    local mem_percent=$((mem_used * 100 / mem_total))
 
-    echo -e "${COLOR_BOLD}Memory${COLOR_RESET}"
+    echo -e "${COLOR_BOLD}Memória${COLOR_RESET}"
     echo "----------------------------------------"
-    echo "Total: ${mem_total} MB"
-    echo "Used:  ${mem_used} MB"
-    echo "Free:  ${mem_free} MB"
-    draw_bar "$mem_used" "$mem_total" 40 "Usage"
+    echo "Uso: ${mem_used} MB / ${mem_total} MB (${mem_percent}%)"
+    draw_bar "$mem_used" "$mem_total" 50 "Uso"
+    echo ""
+
+    # Top 20 Memory Processes
+    echo -e "${COLOR_BOLD}Top 20 Processos por Uso de Memória${COLOR_RESET}"
+    echo "----------------------------------------"
+    echo -e "${COLOR_YELLOW}Nota: Mostrando apenas os 20 primeiros processos${COLOR_RESET}"
+    echo ""
+    printf "%-40s %10s\n" "Processo" "Memória (MB)"
+    echo "----------------------------------------"
+    get_top_memory_processes
     echo ""
 
     # CPU section
-    local cpu_load=$(get_cpu_load)
-    local load_1=$(echo "$cpu_load" | awk '{print $1}')
-    local load_5=$(echo "$cpu_load" | awk '{print $2}')
-    local load_15=$(echo "$cpu_load" | awk '{print $3}')
+    local cpu_usage=$(get_cpu_usage)
+    local cpu_total=100
 
-    echo -e "${COLOR_BOLD}CPU Load Average${COLOR_RESET}"
+    echo -e "${COLOR_BOLD}Processador${COLOR_RESET}"
     echo "----------------------------------------"
-    echo "1 min:  $load_1"
-    echo "5 min:  $load_5"
-    echo "15 min: $load_15"
+    echo "Uso: ${cpu_usage}% / ${cpu_total}%"
+    draw_bar "$cpu_usage" "$cpu_total" 50 "Uso"
     echo ""
 
-    # Disk section
-    local disk_usage=$(get_disk_usage)
-    echo -e "${COLOR_BOLD}Disk Usage${COLOR_RESET}"
+    # Top 20 CPU Processes
+    echo -e "${COLOR_BOLD}Top 20 Processos por Uso de Processador${COLOR_RESET}"
     echo "----------------------------------------"
-    draw_bar "$disk_usage" 100 40 "Root /"
+    echo -e "${COLOR_YELLOW}Nota: Mostrando apenas os 20 primeiros processos${COLOR_RESET}"
+    echo ""
+    printf "%-40s %10s\n" "Processo" "CPU (%)"
+    echo "----------------------------------------"
+    get_top_cpu_processes
     echo ""
 
-    # Optimization history
-    if [[ -d "$LOG_DIR" ]]; then
-        echo -e "${COLOR_BOLD}Recent Optimizations${COLOR_RESET}"
-        echo "----------------------------------------"
-
-        local recent_logs=$(find "$LOG_DIR" -name "*.log" -type f -mtime -7 2>/dev/null | head -5)
-        if [[ -n "$recent_logs" ]]; then
-            local count=0
-            while IFS= read -r log_file && [[ $count -lt 5 ]]; do
-                local log_name=$(basename "$log_file")
-                local log_date=$(stat -f "%Sm" "$log_file" 2>/dev/null || stat -c "%y" "$log_file" 2>/dev/null | cut -d' ' -f1)
-                echo "  $log_name (${log_date})"
-                count=$((count + 1))
-            done <<< "$recent_logs"
-        else
-            echo "  No recent optimizations"
-        fi
-        echo ""
-    fi
-
-    echo "Press 'q' to quit, 'r' to refresh, 'h' for help"
+    echo "Pressione 'q' para sair, 'r' para atualizar"
 }
 
 main() {
