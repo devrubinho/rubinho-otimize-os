@@ -59,17 +59,17 @@ test_warn() {
 # Test that all required scripts exist
 test_script_existence() {
     echo "Testing script existence..."
-    
+
     for script in "${REQUIRED_SCRIPTS[@]}"; do
         local mac_script="${PROJECT_ROOT}/mac/${script}"
         local linux_script="${PROJECT_ROOT}/linux/${script}"
-        
+
         if [[ -f "$mac_script" ]]; then
             test_pass "macOS script exists: $script"
         else
             test_fail "macOS script exists: $script" "File not found"
         fi
-        
+
         if [[ -f "$linux_script" ]]; then
             test_pass "Linux script exists: $script"
         else
@@ -82,17 +82,17 @@ test_script_existence() {
 # Test that scripts are executable
 test_script_executability() {
     echo "Testing script executability..."
-    
+
     for script in "${REQUIRED_SCRIPTS[@]}"; do
         local mac_script="${PROJECT_ROOT}/mac/${script}"
         local linux_script="${PROJECT_ROOT}/linux/${script}"
-        
+
         if [[ -x "$mac_script" ]]; then
             test_pass "macOS script executable: $script"
         else
             test_fail "macOS script executable: $script" "Not executable"
         fi
-        
+
         if [[ -x "$linux_script" ]]; then
             test_pass "Linux script executable: $script"
         else
@@ -105,31 +105,31 @@ test_script_executability() {
 # Test script headers and shebang
 test_script_headers() {
     echo "Testing script headers..."
-    
+
     for script in "${REQUIRED_SCRIPTS[@]}"; do
         local mac_script="${PROJECT_ROOT}/mac/${script}"
         local linux_script="${PROJECT_ROOT}/linux/${script}"
-        
+
         # Check shebang
         if head -1 "$mac_script" 2>/dev/null | grep -q "^#!/usr/bin/env bash"; then
             test_pass "macOS shebang correct: $script"
         else
             test_fail "macOS shebang correct: $script" "Invalid shebang"
         fi
-        
+
         if head -1 "$linux_script" 2>/dev/null | grep -q "^#!/usr/bin/env bash"; then
             test_pass "Linux shebang correct: $script"
         else
             test_fail "Linux shebang correct: $script" "Invalid shebang"
         fi
-        
+
         # Check for version info
         if grep -q "Version:" "$mac_script" 2>/dev/null; then
             test_pass "macOS version info: $script"
         else
             test_warn "macOS version info: $script" "Version not found"
         fi
-        
+
         if grep -q "Version:" "$linux_script" 2>/dev/null; then
             test_pass "Linux version info: $script"
         else
@@ -142,7 +142,7 @@ test_script_headers() {
 # Test CLI interface parity
 test_cli_parity() {
     echo "Testing CLI interface parity..."
-    
+
     # analyze-disk.sh flags
     local analyze_flags=("--dry-run" "--verbose" "--quiet" "--items" "--help")
     for flag in "${analyze_flags[@]}"; do
@@ -151,14 +151,14 @@ test_cli_parity() {
         else
             test_warn "macOS analyze-disk.sh has flag: $flag" "Flag not found in help"
         fi
-        
+
         if bash "${PROJECT_ROOT}/linux/analyze-disk.sh" --help 2>&1 | grep -q "$flag"; then
             test_pass "Linux analyze-disk.sh has flag: $flag"
         else
             test_warn "Linux analyze-disk.sh has flag: $flag" "Flag not found in help"
         fi
     done
-    
+
     # cleanup-disk.sh flags
     local cleanup_flags=("--dry-run" "--verbose" "--quiet" "--force" "--min-age" "--help")
     for flag in "${cleanup_flags[@]}"; do
@@ -167,7 +167,7 @@ test_cli_parity() {
         else
             test_warn "macOS cleanup-disk.sh has flag: $flag" "Flag not found in help"
         fi
-        
+
         if bash "${PROJECT_ROOT}/linux/cleanup-disk.sh" --help 2>&1 | grep -q "$flag"; then
             test_pass "Linux cleanup-disk.sh has flag: $flag"
         else
@@ -180,18 +180,18 @@ test_cli_parity() {
 # Test library dependencies
 test_library_dependencies() {
     echo "Testing library dependencies..."
-    
+
     for script in "${REQUIRED_SCRIPTS[@]}"; do
         local mac_script="${PROJECT_ROOT}/mac/${script}"
         local linux_script="${PROJECT_ROOT}/linux/${script}"
-        
+
         # Check if scripts source common.sh
         if grep -q "lib/common.sh" "$mac_script" 2>/dev/null; then
             test_pass "macOS script sources common.sh: $script"
         else
             test_warn "macOS script sources common.sh: $script" "common.sh not sourced"
         fi
-        
+
         if grep -q "lib/common.sh" "$linux_script" 2>/dev/null; then
             test_pass "Linux script sources common.sh: $script"
         else
@@ -204,17 +204,17 @@ test_library_dependencies() {
 # Test syntax validity
 test_syntax_validity() {
     echo "Testing script syntax validity..."
-    
+
     for script in "${REQUIRED_SCRIPTS[@]}"; do
         local mac_script="${PROJECT_ROOT}/mac/${script}"
         local linux_script="${PROJECT_ROOT}/linux/${script}"
-        
+
         if bash -n "$mac_script" 2>/dev/null; then
             test_pass "macOS script syntax valid: $script"
         else
             test_fail "macOS script syntax valid: $script" "Syntax errors found"
         fi
-        
+
         if bash -n "$linux_script" 2>/dev/null; then
             test_pass "Linux script syntax valid: $script"
         else
@@ -230,14 +230,14 @@ main() {
     echo "Platform Parity Tests"
     echo "=========================================="
     echo ""
-    
+
     test_script_existence
     test_script_executability
     test_script_headers
     test_cli_parity
     test_library_dependencies
     test_syntax_validity
-    
+
     # Summary
     echo "=========================================="
     echo "Test Summary"
@@ -247,7 +247,7 @@ main() {
     echo -e "${COLOR_YELLOW}Warnings: $WARNINGS${COLOR_RESET}"
     echo "Total: $((PASSED + FAILED + WARNINGS))"
     echo ""
-    
+
     if [[ $FAILED -eq 0 ]]; then
         echo "All critical tests passed!"
         exit 0
@@ -259,4 +259,3 @@ main() {
 
 # Run main function
 main "$@"
-
