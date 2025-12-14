@@ -303,8 +303,8 @@ get_os_type() {
     uname -s 2>/dev/null || echo "unknown"
 }
 
-# Compatibility functions for reference-proj libraries
-# These provide is_macos() and is_linux() functions similar to platform.sh
+# Platform detection compatibility functions
+# These provide is_macos() and is_linux() functions for cross-platform compatibility
 is_macos() {
     [[ $(get_os_type) == "Darwin" ]]
 }
@@ -313,7 +313,7 @@ is_linux() {
     [[ $(get_os_type) == "Linux" ]]
 }
 
-# Export PLATFORM variable for compatibility with reference-proj libraries
+# Export PLATFORM variable for cross-platform compatibility
 # Set PLATFORM to "macos" or "linux" based on detected OS
 if is_macos; then
     export PLATFORM="macos"
