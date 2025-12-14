@@ -238,4 +238,3 @@ export -f get_disk_categories
 export -f analyze_disk_usage
 export -f get_category_path
 export -f analyze_all_categories
-

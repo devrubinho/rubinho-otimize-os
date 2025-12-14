@@ -153,9 +153,9 @@ EOF
 # Clean a specific category
 clean_category() {
     local category="$1"
-    
+
     log_info "Cleaning category: $category"
-    
+
     if delete_category_files "$category" "$MIN_AGE_DAYS"; then
         print_success "Cleaned category: $category"
         return 0
@@ -239,4 +239,3 @@ main() {
 
 # Run main function
 main "$@"
-

@@ -95,7 +95,7 @@ scan_cleanup_category() {
     if [[ $min_age_days -gt 0 ]]; then
         # Find files older than min_age_days
         local cutoff_date=$(date -v-${min_age_days}d 2>/dev/null || date -d "${min_age_days} days ago" 2>/dev/null)
-        
+
         if is_macos; then
             while IFS= read -r file; do
                 [[ -n "$file" ]] && files+=("$file")
@@ -162,7 +162,7 @@ show_cleanup_preview() {
     for result in "${results[@]}"; do
         IFS='|' read -r cat_name path file_count size <<< "$result"
         local size_formatted=""
-        
+
         if command -v format_bytes >/dev/null 2>&1; then
             size_formatted=$(format_bytes "$size")
         else
@@ -323,4 +323,3 @@ export -f scan_cleanup_category
 export -f show_cleanup_preview
 export -f cleanup_files_interactive
 export -f delete_category_files
-

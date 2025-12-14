@@ -170,7 +170,7 @@ display_categorized_analysis() {
 
     for category in $categories; do
         local path=$(get_category_path "$category")
-        
+
         if [[ -z "$path" ]] || [[ ! -e "$path" ]]; then
             continue
         fi
@@ -184,7 +184,7 @@ display_categorized_analysis() {
     done
 
     echo "--------------------------------------------------------------------------------"
-    
+
     local total_formatted=$(format_bytes "$total_size")
     printf "%-20s %-50s %15s %15s\n" "TOTAL" "" "$total_formatted" ""
     print_info ""
@@ -193,7 +193,7 @@ display_categorized_analysis() {
 # Display top N largest items
 display_top_items() {
     local count="$1"
-    
+
     print_info "=========================================="
     print_info "Top $count Largest Items (Files & Folders)"
     print_info "=========================================="
@@ -201,7 +201,7 @@ display_top_items() {
 
     # Analyze home directory
     local home_items=$(get_top_items "${HOME}" "$count")
-    
+
     printf "%-15s %-60s %10s\n" "Size" "Path" "Type"
     echo "--------------------------------------------------------------------------------"
 
@@ -232,7 +232,7 @@ display_cleanup_opportunities() {
 
     for category in $categories; do
         local path=$(get_category_path "$category")
-        
+
         if [[ -z "$path" ]] || [[ ! -e "$path" ]]; then
             continue
         fi
@@ -240,7 +240,7 @@ display_cleanup_opportunities() {
         local result=$(analyze_disk_usage "$path" "$category")
         if [[ -n "$result" ]]; then
             IFS='|' read -r cat_name path size size_formatted size_mb file_count dir_count <<< "$result"
-            
+
             # Highlight if size is above threshold (100MB default)
             if [[ $size_mb -ge ${HIGHLIGHT_THRESHOLD:-100} ]]; then
                 opportunities+=("$cat_name|$path|$size_formatted|$size_mb")
@@ -259,7 +259,7 @@ display_cleanup_opportunities() {
 
     for opp in "${opportunities[@]}"; do
         IFS='|' read -r cat_name path size_formatted size_mb <<< "$opp"
-        
+
         # Truncate long paths
         local display_path="$path"
         if [[ ${#display_path} -gt 48 ]]; then
@@ -317,4 +317,3 @@ main() {
 
 # Run main function
 main "$@"
-

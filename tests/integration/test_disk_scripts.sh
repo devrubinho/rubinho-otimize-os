@@ -52,7 +52,7 @@ test_disk_analysis_library() {
     # Test format_bytes
     if [[ -f "${PROJECT_ROOT}/lib/disk_analysis.sh" ]]; then
         source "${PROJECT_ROOT}/lib/disk_analysis.sh"
-        
+
         local result=$(format_bytes 1024)
         if [[ -n "$result" ]]; then
             test_pass "format_bytes function exists and returns output"
@@ -70,7 +70,7 @@ test_cleanup_preview_library() {
 
     if [[ -f "${PROJECT_ROOT}/lib/cleanup_preview.sh" ]]; then
         source "${PROJECT_ROOT}/lib/cleanup_preview.sh"
-        
+
         local categories=$(get_cleanup_categories)
         if [[ -n "$categories" ]]; then
             test_pass "get_cleanup_categories returns categories"
@@ -88,7 +88,7 @@ test_analyze_disk_script() {
 
     local os_type=$(uname -s)
     local script_path=""
-    
+
     if [[ "$os_type" == "Darwin" ]]; then
         script_path="${PROJECT_ROOT}/mac/analyze-disk.sh"
     elif [[ "$os_type" == "Linux" ]]; then
@@ -129,7 +129,7 @@ test_cleanup_disk_script() {
 
     local os_type=$(uname -s)
     local script_path=""
-    
+
     if [[ "$os_type" == "Darwin" ]]; then
         script_path="${PROJECT_ROOT}/mac/cleanup-disk.sh"
     elif [[ "$os_type" == "Linux" ]]; then
@@ -170,7 +170,7 @@ test_platform_detection() {
 
     if [[ -f "${PROJECT_ROOT}/lib/common.sh" ]]; then
         source "${PROJECT_ROOT}/lib/common.sh"
-        
+
         if command -v is_macos >/dev/null 2>&1 || type is_macos >/dev/null 2>&1; then
             test_pass "is_macos() function exists"
         else
@@ -200,7 +200,7 @@ test_library_integration() {
     local os_type=$(uname -s)
     local analyze_script=""
     local cleanup_script=""
-    
+
     if [[ "$os_type" == "Darwin" ]]; then
         analyze_script="${PROJECT_ROOT}/mac/analyze-disk.sh"
         cleanup_script="${PROJECT_ROOT}/mac/cleanup-disk.sh"
@@ -272,4 +272,3 @@ main() {
 
 # Run main function
 main "$@"
-
