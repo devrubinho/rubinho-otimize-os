@@ -163,6 +163,22 @@ get_top_items() {
 }
 
 # Display categorized analysis
+# Format size in MB or GB (user preference)
+format_size_mb() {
+    local bytes="$1"
+    local size_mb=$((bytes / 1024 / 1024))
+
+    if [[ $size_mb -ge 1024 ]]; then
+        # If >= 1GB, show in GB
+        local size_gb=$(awk "BEGIN {printf \"%.2f\", $bytes / 1073741824}")
+        echo "${size_gb} GB"
+    else
+        # Show in MB
+        local size_mb_float=$(awk "BEGIN {printf \"%.2f\", $bytes / 1048576}")
+        echo "${size_mb_float} MB"
+    fi
+}
+
 display_categorized_analysis() {
     print_info ""
     print_info "=========================================="
@@ -186,14 +202,15 @@ display_categorized_analysis() {
         local result=$(analyze_disk_usage "$path" "$category")
         if [[ -n "$result" ]]; then
             IFS='|' read -r cat_name path size size_formatted size_mb file_count dir_count <<< "$result"
-            printf "%-20s %-50s %15s %15s\n" "$cat_name" "$path" "$size_formatted" "$file_count"
+            local size_mb_formatted=$(format_size_mb "$size")
+            printf "%-20s %-50s %15s %15s\n" "$cat_name" "$path" "$size_mb_formatted" "$file_count"
             total_size=$((total_size + size))
         fi
     done
 
     echo "--------------------------------------------------------------------------------"
 
-    local total_formatted=$(format_bytes "$total_size")
+    local total_formatted=$(format_size_mb "$total_size")
     printf "%-20s %-50s %15s %15s\n" "TOTAL" "" "$total_formatted" ""
     print_info ""
 }

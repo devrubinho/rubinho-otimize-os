@@ -17,7 +17,11 @@ LOG_FILE=""
 DRY_RUN=false
 QUIET=false
 VERBOSE=false
-PROCESS_THRESHOLD=50
+
+# Metrics tracking
+PROCESSES_TERMINATED=0
+LOGS_CLEANED_MB=0
+PROCESS_THRESHOLD=20
 
 # Color codes
 if command -v tput >/dev/null 2>&1 && [[ -t 1 ]]; then
@@ -46,6 +50,27 @@ SAFE_KILL_LIST=(
     "cfprefsd"
     "Dock"
     "Finder"
+    "Cursor"
+    "cursor"
+    "Code"
+    "code"
+    "Xcode"
+    "xcode"
+    "Sublime Text"
+    "sublime"
+    "Atom"
+    "atom"
+    "WebStorm"
+    "webstorm"
+    "IntelliJ"
+    "intellij"
+    "Terminal"
+    "terminal"
+    "iTerm"
+    "iterm"
+    "zsh"
+    "bash"
+    "fish"
 )
 
 # Load averages
@@ -152,15 +177,28 @@ display_load_averages() {
 is_protected_process() {
     local process_name="$1"
     local pid="$2"
+    local user="$3"
 
     # Check PID protection (0, 1, and low PIDs)
     if [[ $pid -eq 0 ]] || [[ $pid -eq 1 ]] || [[ $pid -lt 100 ]]; then
         return 0  # Protected
     fi
 
-    # Check safe-kill list
+    # Protect processes owned by current user (to avoid killing user's active applications)
+    local current_user=$(whoami 2>/dev/null || echo "")
+    if [[ -n "$user" ]] && [[ "$user" == "$current_user" ]]; then
+        # Additional check: only protect if it's a GUI application or important process
+        # Check if it's in /Applications (GUI app)
+        if ps -p "$pid" -o command= 2>/dev/null | grep -q "/Applications/"; then
+            return 0  # Protected - GUI application
+        fi
+    fi
+
+    # Check safe-kill list (case-insensitive)
+    local process_lower=$(echo "$process_name" | tr '[:upper:]' '[:lower:]')
     for protected in "${SAFE_KILL_LIST[@]}"; do
-        if [[ "$process_name" == "$protected" ]] || [[ "$process_name" == *"$protected"* ]]; then
+        local protected_lower=$(echo "$protected" | tr '[:upper:]' '[:lower:]')
+        if [[ "$process_lower" == "$protected_lower" ]] || [[ "$process_lower" == *"$protected_lower"* ]]; then
             return 0  # Protected
         fi
     done
@@ -264,7 +302,7 @@ kill_process_safe() {
     local command_line="$5"
 
     # Check if protected
-    if is_protected_process "$process_name" "$pid"; then
+    if is_protected_process "$process_name" "$pid" "$user"; then
         print_warning "Process $process_name (PID $pid) is protected and cannot be killed"
         log_message "PROTECTED" "PID=$pid, Name=$process_name, CPU=$cpu%, User=$user, Command=$command_line"
         return 1
@@ -288,6 +326,7 @@ kill_process_safe() {
             print_warning "Process still running after SIGTERM, sending SIGKILL..."
             if kill -KILL "$pid" 2>/dev/null; then
                 print_success "Process $process_name (PID $pid) terminated"
+                PROCESSES_TERMINATED=$((PROCESSES_TERMINATED + 1))
                 return 0
             else
                 print_error "Failed to kill process $process_name (PID $pid)"
@@ -295,6 +334,7 @@ kill_process_safe() {
             fi
         else
             print_success "Process $process_name (PID $pid) terminated gracefully"
+            PROCESSES_TERMINATED=$((PROCESSES_TERMINATED + 1))
             return 0
         fi
     else
@@ -332,9 +372,25 @@ clean_asl_logs() {
     local count=$(find "$asl_dir" -name "*.asl" -type f 2>/dev/null | wc -l | tr -d ' ')
 
     if [[ $count -gt 0 ]]; then
+        # Calculate size before deletion
+        local size_bytes=0
+        if command -v du >/dev/null 2>&1; then
+            # Use du for more reliable size calculation
+            size_bytes=$(du -sk "$asl_dir"/*.asl 2>/dev/null | awk '{sum+=$1} END {print sum*1024+0}')
+        else
+            # Fallback to stat
+            size_bytes=$(find "$asl_dir" -name "*.asl" -type f -exec stat -f "%z" {} \; 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
+        fi
+        local size_mb=$((size_bytes / 1024 / 1024))
+        # Ensure non-negative
+        if [[ $size_mb -lt 0 ]]; then
+            size_mb=0
+        fi
+
         if sudo rm -rf "$asl_dir"/*.asl 2>/dev/null; then
             print_success "Removed $count ASL log file(s)"
             log_message "INFO" "ASL logs cleaned: $count files removed"
+            LOGS_CLEANED_MB=$((LOGS_CLEANED_MB + size_mb))
             return 0
         else
             print_error "Failed to remove ASL logs"
@@ -375,14 +431,15 @@ optimize_unified_logs() {
     local success=false
 
     # Try method 1: log erase with TTL (macOS 10.12+)
+    # This removes logs older than 30 days without creating archive files
     if sudo log erase --ttl 30d 2>/dev/null; then
         success=true
     # Try method 2: log config to set TTL
+    # This configures the system to automatically prune logs older than 30 days
     elif sudo log config --ttl 30d 2>/dev/null; then
         success=true
-    # Try method 3: log collect with prune (alternative)
-    elif sudo log collect --last 30d 2>/dev/null; then
-        success=true
+    # Note: We don't use "log collect" as it creates archive files (system_logs.logarchive)
+    # which we want to avoid
     fi
 
     if [[ "$success" == "true" ]]; then
@@ -395,6 +452,65 @@ optimize_unified_logs() {
     fi
 
     return 0  # Always return success since this is optional
+}
+
+# Automatic process termination (for non-interactive mode)
+auto_terminate_processes() {
+    local processes="$1"
+    local terminated=0
+    local skipped=0
+
+    if [[ -z "$processes" ]] || [[ -z "${processes// }" ]]; then
+        return 0
+    fi
+
+    if is_dry_run; then
+        print_info "[DRY-RUN] Would automatically terminate high CPU processes"
+        return 0
+    fi
+
+    print_info ""
+    print_info "Automatically terminating high CPU processes..."
+
+    # Use process substitution to avoid subshell issues
+    while IFS='|' read -r pid cpu user cmd level; do
+        if [[ -z "$pid" ]]; then
+            continue
+        fi
+
+        # Extract process name from command (first word)
+        local process_name=$(echo "$cmd" | awk '{print $1}' | xargs basename 2>/dev/null || echo "$cmd")
+
+        # Skip if process no longer exists
+        if ! kill -0 "$pid" 2>/dev/null; then
+            log_message "INFO" "Process $process_name (PID $pid) no longer exists, skipping"
+            skipped=$((skipped + 1))
+            continue
+        fi
+
+        # Check if process is protected
+        if is_protected_process "$process_name" "$pid" "$user"; then
+            log_message "PROTECTED" "Skipping protected process: $process_name (PID $pid, CPU $cpu%, User=$user)"
+            skipped=$((skipped + 1))
+            continue
+        fi
+
+        # Terminate the process
+        if kill_process_safe "$pid" "$process_name" "$cpu" "$user" "$cmd"; then
+            terminated=$((terminated + 1))
+            PROCESSES_TERMINATED=$((PROCESSES_TERMINATED + 1))
+            log_message "INFO" "Automatically terminated: $process_name (PID $pid, CPU $cpu%)"
+        else
+            skipped=$((skipped + 1))
+        fi
+    done < <(echo "$processes")
+
+    if [[ $terminated -gt 0 ]]; then
+        print_success "Terminated $terminated process(es) automatically"
+    fi
+    if [[ $skipped -gt 0 ]]; then
+        print_info "Skipped $skipped protected or failed process(es)"
+    fi
 }
 
 # Interactive process management
@@ -644,9 +760,20 @@ main() {
         print_info "No processes found using >= ${PROCESS_THRESHOLD}% CPU"
     else
         display_cpu_processes "$processes"
-        # Interactive process management (simplified)
-        if [[ "$QUIET" == "false" ]] && [[ "$DRY_RUN" == "false" ]]; then
+
+        # Automatic process termination for non-interactive mode
+        if [[ "$QUIET" == "true" ]] && [[ "$DRY_RUN" == "false" ]]; then
+            auto_terminate_processes "$processes"
+        # Interactive process management for interactive mode
+        elif [[ "$QUIET" == "false" ]] && [[ "$DRY_RUN" == "false" ]]; then
             interactive_process_management "$processes"
+        elif [[ "$DRY_RUN" == "true" ]]; then
+            print_info "[DRY-RUN] Would terminate processes in non-dry-run mode"
+        fi
+
+        # Log summary if in quiet mode
+        if [[ "$QUIET" == "true" ]] && [[ $PROCESSES_TERMINATED -gt 0 ]]; then
+            print_info "Automatically terminated $PROCESSES_TERMINATED process(es)"
         fi
     fi
 
@@ -682,6 +809,16 @@ main() {
     if [[ -n "$LOG_FILE" ]]; then
         print_info "Log file: $LOG_FILE"
     fi
+
+    # Write metrics to temporary file for parent script
+    local metrics_file="${HOME}/.os-optimize/.optimize-cpu-metrics.json"
+    mkdir -p "$(dirname "$metrics_file")" 2>/dev/null || true
+    {
+        echo "{"
+        echo "  \"processes_terminated\": $PROCESSES_TERMINATED,"
+        echo "  \"logs_cleaned_mb\": $LOGS_CLEANED_MB"
+        echo "}"
+    } > "$metrics_file" 2>/dev/null || true
 }
 
 # Run main function

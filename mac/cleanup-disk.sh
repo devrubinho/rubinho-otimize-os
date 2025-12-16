@@ -191,21 +191,13 @@ main() {
         print_info ""
     fi
 
-    # Show cleanup preview first
-    print_info "Previewing cleanup opportunities..."
-    print_info ""
-    show_cleanup_preview "$MIN_AGE_DAYS"
-
-    # Confirm before proceeding (unless force or dry-run)
+    # Note: Use analyze-disk.sh to preview what will be cleaned
     if ! is_dry_run && [[ "$FORCE" != "true" ]]; then
-        if ! confirm "Proceed with cleanup? (y/N)" "N"; then
-            print_info "Cleanup cancelled by user"
-            exit 0
-        fi
+        print_info "Note: Use 'analyze-disk.sh' to preview disk usage before cleaning"
         print_info ""
     fi
 
-    # Clean each category
+    # Clean each category with individual confirmation
     local categories=$(get_cleanup_categories)
     local cleaned=0
     local failed=0
@@ -214,6 +206,58 @@ main() {
     print_info ""
 
     for category in $categories; do
+        # Ask for confirmation for each category (unless force or dry-run)
+        if ! is_dry_run && [[ "$FORCE" != "true" ]]; then
+            # Get category path for display
+            local category_path=""
+            if command -v get_category_path >/dev/null 2>&1; then
+                category_path=$(get_category_path "$category")
+            fi
+
+            # Special handling for categories without single path
+            if [[ -z "$category_path" ]]; then
+                case "$category" in
+                    node_modules)
+                        category_path="Multiple project directories"
+                        ;;
+                    volumes)
+                        category_path="Docker volumes (unused only)"
+                        ;;
+                    build_artifacts)
+                        category_path="Multiple project directories"
+                        ;;
+                    *)
+                        category_path="Various locations"
+                        ;;
+                esac
+            fi
+
+            # Format category name for display
+            local category_display="$category"
+            case "$category" in
+                browser_trash)
+                    category_display="Browser Trash"
+                    ;;
+                node_modules)
+                    category_display="node_modules"
+                    ;;
+                build_artifacts)
+                    category_display="Build Artifacts"
+                    ;;
+                orphaned_apps)
+                    category_display="Orphaned Apps (Deleted Apps Configs)"
+                    ;;
+                *)
+                    category_display=$(echo "$category" | sed 's/_/ /g' | awk '{for(i=1;i<=NF;i++)sub(/./,toupper(substr($i,1,1)),$i)}1')
+                    ;;
+            esac
+
+            if ! confirm "Clean category: $category_display ($category_path)? (y/N)" "N"; then
+                print_info "Skipping category: $category"
+                continue
+            fi
+        fi
+
         if clean_category "$category"; then
             cleaned=$((cleaned + 1))
         else

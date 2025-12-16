@@ -64,9 +64,10 @@ format_bytes() {
 
 get_disk_categories() {
     if is_macos; then
-        echo "caches logs downloads temp browser_trash xcode node_modules docker volumes"
+        # Removed 'downloads' - too dangerous, may contain important user files
+        echo "caches logs temp browser_trash xcode node_modules docker volumes build_artifacts orphaned_apps"
     elif is_linux; then
-        echo "caches logs temp browser_trash apt yum pacman node_modules docker volumes snap"
+        echo "caches logs temp browser_trash apt yum pacman node_modules docker volumes build_artifacts snap orphaned_apps"
     else
         echo "caches logs temp"
     fi
@@ -87,18 +88,21 @@ analyze_disk_usage() {
     local dir_count=0
 
     if command -v du >/dev/null 2>&1; then
-        local size_output=$(du -sk "$path" 2>/dev/null | awk '{print $1}')
+        # Calculate total size (protected dirs included in size but excluded from counts)
+        local size_output=$(du -sk "$path" 2>/dev/null | awk '{print $1}' || echo "0")
         total_size=$((size_output * 1024))
-        file_count=$(find "$path" -maxdepth "$max_depth" -type f 2>/dev/null | wc -l | tr -d ' ')
-        dir_count=$(find "$path" -maxdepth "$max_depth" -type d 2>/dev/null | wc -l | tr -d ' ')
+
+        # Count files and directories excluding protected ones
+        file_count=$(find "$path" \( -name ".git" -o -name ".claude" -o -name ".cursor" -o -name ".task-flow" \) -prune -o -maxdepth "$max_depth" -type f -print 2>/dev/null | wc -l | tr -d ' ')
+        dir_count=$(find "$path" \( -name ".git" -o -name ".claude" -o -name ".cursor" -o -name ".task-flow" \) -prune -o -maxdepth "$max_depth" -type d -print 2>/dev/null | wc -l | tr -d ' ')
     else
         log_warn "du command not found, using find as fallback"
-        local sizes=$(find "$path" -maxdepth "$max_depth" -type f -exec stat -f%z {} \; 2>/dev/null || find "$path" -maxdepth "$max_depth" -type f -exec stat -c%s {} \; 2>/dev/null)
+        local sizes=$(find "$path" \( -name ".git" -o -name ".claude" -o -name ".cursor" -o -name ".task-flow" \) -prune -o -maxdepth "$max_depth" -type f -exec stat -f%z {} \; 2>/dev/null || find "$path" \( -name ".git" -o -name ".claude" -o -name ".cursor" -o -name ".task-flow" \) -prune -o -maxdepth "$max_depth" -type f -exec stat -c%s {} \; 2>/dev/null)
         for size in $sizes; do
             total_size=$((total_size + size))
         done
-        file_count=$(find "$path" -maxdepth "$max_depth" -type f 2>/dev/null | wc -l | tr -d ' ')
-        dir_count=$(find "$path" -maxdepth "$max_depth" -type d 2>/dev/null | wc -l | tr -d ' ')
+        file_count=$(find "$path" \( -name ".git" -o -name ".claude" -o -name ".cursor" -o -name ".task-flow" \) -prune -o -maxdepth "$max_depth" -type f -print 2>/dev/null | wc -l | tr -d ' ')
+        dir_count=$(find "$path" \( -name ".git" -o -name ".claude" -o -name ".cursor" -o -name ".task-flow" \) -prune -o -maxdepth "$max_depth" -type d -print 2>/dev/null | wc -l | tr -d ' ')
     fi
 
     local size_formatted=$(format_bytes "$total_size")
@@ -124,9 +128,10 @@ get_category_path() {
                 echo "/var/log"
             fi
             ;;
-        downloads)
-            echo "${HOME}/Downloads"
-            ;;
+        # downloads removed - too dangerous, may contain important user files
+        # downloads)
+        #     echo "${HOME}/Downloads"
+        #     ;;
         temp)
             if is_macos; then
                 echo "/tmp"
@@ -160,6 +165,16 @@ get_category_path() {
             ;;
         volumes)
             echo ""
+            ;;
+        build_artifacts)
+            echo ""
+            ;;
+        orphaned_apps)
+            if is_macos; then
+                echo "${HOME}/Library/Application Support"
+            else
+                echo "${HOME}/.config"
+            fi
             ;;
         apt)
             if is_linux; then

@@ -131,27 +131,118 @@ EOF
 # ============ Disk Analysis Functions ============
 
 get_top_items() {
-    local root_path="${1:-/}"
+    local root_path="${1:-${HOME}}"
     local count="${2:-20}"
     local items=()
 
     print_info "Scanning for largest items in $root_path..."
+    print_info "This may take a moment for large directories..."
 
-    # Find largest directories
+    # Find largest directories (optimized - limit depth and use timeout)
     if command -v du >/dev/null 2>&1; then
-        # Use du for directories
-        while IFS= read -r line; do
-            [[ -n "$line" ]] && items+=("$line")
-        done < <(du -h -d 1 "$root_path" 2>/dev/null | sort -rh | head -n $count | awk '{print $1 "|" $2 "|dir"}')
+        # Use du for top-level directories only (much faster)
+        # Limit to depth 1 to avoid scanning entire directory tree
+        local dirs_found=0
+        while IFS= read -r line && [[ $dirs_found -lt $count ]]; do
+            [[ -z "$line" ]] && continue
+            local size=$(echo "$line" | awk '{print $1}')
+            local path=$(echo "$line" | awk '{print $2}')
+            # Skip if path is the root itself
+            [[ "$path" == "$root_path" ]] && continue
+            # Skip protected directories (.git, .claude, .cursor, .task-flow)
+            local basename_path=$(basename "$path")
+            if [[ "$basename_path" == ".git" ]] || \
+               [[ "$basename_path" == ".claude" ]] || \
+               [[ "$basename_path" == ".cursor" ]] || \
+               [[ "$basename_path" == ".task-flow" ]]; then
+                continue
+            fi
+            items+=("${size}|${path}|dir")
+            dirs_found=$((dirs_found + 1))
+        done < <(
+            if command -v timeout >/dev/null 2>&1; then
+                timeout 30 du -h -d 1 "$root_path" 2>/dev/null | sort -rh | head -n $((count * 2))
+            elif command -v gtimeout >/dev/null 2>&1; then
+                gtimeout 30 du -h -d 1 "$root_path" 2>/dev/null | sort -rh | head -n $((count * 2))
+            else
+                # Fallback: limit results immediately to prevent hanging
+                du -h -d 1 "$root_path" 2>/dev/null | sort -rh | head -n $((count * 2))
+            fi
+        )
 
-        # Find largest files (limit depth to avoid too many results)
+        # Find largest files (optimized - use du on directories, then find largest files within)
+        # Strategy: Find largest directories first, then find largest files within those directories
+        # This avoids scanning the entire home directory
+
+        # Get top directories by size (already have this from above)
+        # Now find largest files within the largest directories
+        local files_found=0
+        local top_dirs=()
+
+        # Collect top directories (excluding the root itself)
         while IFS= read -r line; do
-            [[ -n "$line" ]] && items+=("$line")
-        done < <(find "$root_path" -type f -exec du -h {} \; 2>/dev/null | sort -rh | head -n $count | awk '{print $1 "|" $2 "|file"}')
+            [[ -z "$line" ]] && continue
+            local dir_path=$(echo "$line" | awk -F'|' '{print $2}')
+            [[ "$dir_path" == "$root_path" ]] && continue
+            [[ -d "$dir_path" ]] && top_dirs+=("$dir_path")
+        done < <(printf '%s\n' "${items[@]}" | grep "|dir$" | head -10)
+
+        # Find largest files in top directories (limit to prevent hanging)
+        for dir in "${top_dirs[@]}"; do
+            [[ $files_found -ge $count ]] && break
+            [[ ! -d "$dir" ]] && continue
+
+            # Use find with very limited scope and timeout
+            while IFS= read -r file && [[ $files_found -lt $count ]]; do
+                [[ -z "$file" ]] || [[ ! -f "$file" ]] && continue
+
+                # Get file size using stat (much faster than du)
+                local size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null || echo "0")
+                # Only include files larger than 50MB to focus on truly large files
+                if [[ "$size" =~ ^[0-9]+$ ]] && [[ $size -gt 52428800 ]]; then
+                    # Convert to human-readable format
+                    local size_mb=$((size / 1024 / 1024))
+                    if [[ $size_mb -ge 1024 ]]; then
+                        local size_gb=$(awk "BEGIN {printf \"%.2f\", $size / 1073741824}")
+                        local size_human="${size_gb}G"
+                    else
+                        local size_human="${size_mb}M"
+                    fi
+                    items+=("${size_human}|${file}|file")
+                    files_found=$((files_found + 1))
+                fi
+            done < <(
+                if command -v timeout >/dev/null 2>&1; then
+                    timeout 10 find "$dir" \( -name ".git" -o -name ".claude" -o -name ".cursor" -o -name ".task-flow" \) -prune -o -maxdepth 2 -type f -size +50M -print 2>/dev/null | head -20
+                elif command -v gtimeout >/dev/null 2>&1; then
+                    gtimeout 10 find "$dir" \( -name ".git" -o -name ".claude" -o -name ".cursor" -o -name ".task-flow" \) -prune -o -maxdepth 2 -type f -size +50M -print 2>/dev/null | head -20
+                else
+                    # Fallback: use head immediately to limit results
+                    find "$dir" \( -name ".git" -o -name ".claude" -o -name ".cursor" -o -name ".task-flow" \) -prune -o -maxdepth 2 -type f -size +50M -print 2>/dev/null | head -20
+                fi
+            )
+        done
     fi
 
-    # Sort all items by size (approximate)
+    # Sort all items by size (convert human-readable sizes to bytes for sorting)
+    # Simple approach: sort by the size string (works for most cases)
     printf '%s\n' "${items[@]}" | head -n $count
+}
+
+# Format size in MB or GB (user preference)
+format_size_mb() {
+    local bytes="$1"
+    local size_mb=$((bytes / 1024 / 1024))
+
+    if [[ $size_mb -ge 1024 ]]; then
+        # If >= 1GB, show in GB
+        local size_gb=$(awk "BEGIN {printf \"%.2f\", $bytes / 1073741824}")
+        echo "${size_gb} GB"
+    else
+        # Show in MB
+        local size_mb_float=$(awk "BEGIN {printf \"%.2f\", $bytes / 1048576}")
+        echo "${size_mb_float} MB"
+    fi
 }
 
 display_categorized_analysis() {
@@ -177,14 +268,15 @@ display_categorized_analysis() {
         local result=$(analyze_disk_usage "$path" "$category")
         if [[ -n "$result" ]]; then
             IFS='|' read -r cat_name path size size_formatted size_mb file_count dir_count <<< "$result"
-            printf "%-20s %-50s %15s %15s\n" "$cat_name" "$path" "$size_formatted" "$file_count"
+            local size_mb_formatted=$(format_size_mb "$size")
+            printf "%-20s %-50s %15s %15s\n" "$cat_name" "$path" "$size_mb_formatted" "$file_count"
             total_size=$((total_size + size))
         fi
     done
 
     echo "--------------------------------------------------------------------------------"
 
-    local total_formatted=$(format_bytes "$total_size")
+    local total_formatted=$(format_size_mb "$total_size")
     printf "%-20s %-50s %15s %15s\n" "TOTAL" "" "$total_formatted" ""
     print_info ""
 }

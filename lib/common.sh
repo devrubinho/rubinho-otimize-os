@@ -600,7 +600,17 @@ print_debug() {
     fi
 }
 
-trap 'cleanup; for handler in "${CLEANUP_HANDLERS[@]}"; do $handler; done' EXIT INT TERM
+# Trap handler that safely executes cleanup handlers
+_execute_cleanup_handlers() {
+    cleanup
+    if [[ -n "${CLEANUP_HANDLERS:-}" ]] && [[ ${#CLEANUP_HANDLERS[@]} -gt 0 ]] 2>/dev/null; then
+        for handler in "${CLEANUP_HANDLERS[@]}"; do
+            $handler 2>/dev/null || true
+        done
+    fi
+}
+
+trap '_execute_cleanup_handlers' EXIT INT TERM
 
 error_handler() {
     local line_num="$1"

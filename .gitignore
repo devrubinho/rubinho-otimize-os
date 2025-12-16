@@ -24,16 +24,13 @@ node_modules/
 # OS specific
 .DS_Store
 
-# Task files
-tasks.json
-tasks/
-
 .claude/
-.taskmaster/
 .mcp.json
 .env
 .cursor/
 
 CLAUDE.md
 
-reference-proj/
+system_logs.logarchive
+system_logs.logarchive/
+*.logarchive

@@ -202,8 +202,23 @@ execute_memory_clean() {
         print_success "Memory optimization completed"
     fi
 
-    # Parse output for metrics (simplified - would need JSON output from clean-memory.sh)
-    MEMORY_TIME=$((MEMORY_TIME + 1))  # Placeholder
+    # Read metrics from temporary file
+    local metrics_file="${HOME}/.os-optimize/.clean-memory-metrics.json"
+    if [[ -f "$metrics_file" ]]; then
+        if command -v python3 >/dev/null 2>&1; then
+            MEMORY_FREED_MB=$(python3 -c "import json; f=open('$metrics_file'); d=json.load(f); print(int(d.get('memory_freed_mb', 0)))" 2>/dev/null || echo "0")
+        elif command -v python >/dev/null 2>&1; then
+            MEMORY_FREED_MB=$(python -c "import json; f=open('$metrics_file'); d=json.load(f); print(int(d.get('memory_freed_mb', 0)))" 2>/dev/null || echo "0")
+        else
+            # Fallback: parse with grep/sed
+            MEMORY_FREED_MB=$(grep -o '"memory_freed_mb": [0-9-]*' "$metrics_file" 2>/dev/null | grep -o '[0-9-]*' | head -1 || echo "0")
+        fi
+        # Ensure it's a valid integer
+        if ! [[ "$MEMORY_FREED_MB" =~ ^-?[0-9]+$ ]]; then
+            MEMORY_FREED_MB=0
+        fi
+        rm -f "$metrics_file" 2>/dev/null || true
+    fi
 
     show_progress 2 4 "Memory Optimization Complete"
     print_info ""
@@ -222,11 +237,9 @@ execute_cpu_optimize() {
     local cpu_output
     local cpu_exit_code=0
 
-    if [[ "$QUICK" == "true" ]]; then
-        cpu_output=$("${SCRIPT_DIR}/optimize-cpu.sh" --quiet 2>&1) || cpu_exit_code=$?
-    else
-        cpu_output=$("${SCRIPT_DIR}/optimize-cpu.sh" 2>&1) || cpu_exit_code=$?
-    fi
+    # Always use --quiet for automatic process termination when called from optimize-all.sh
+    # This enables auto_terminate_processes instead of interactive mode
+    cpu_output=$("${SCRIPT_DIR}/optimize-cpu.sh" --quiet 2>&1) || cpu_exit_code=$?
 
     if [[ $cpu_exit_code -ne 0 ]]; then
         print_warning "CPU optimization completed with warnings (exit code: $cpu_exit_code)"
@@ -234,8 +247,29 @@ execute_cpu_optimize() {
         print_success "CPU optimization completed"
     fi
 
-    # Parse output for metrics (simplified - would need JSON output from optimize-cpu.sh)
-    CPU_TIME=$((CPU_TIME + 1))  # Placeholder
+    # Read metrics from temporary file
+    local metrics_file="${HOME}/.os-optimize/.optimize-cpu-metrics.json"
+    if [[ -f "$metrics_file" ]]; then
+        if command -v python3 >/dev/null 2>&1; then
+            CPU_PROCESSES_TERMINATED=$(python3 -c "import json; f=open('$metrics_file'); d=json.load(f); print(int(d.get('processes_terminated', 0)))" 2>/dev/null || echo "0")
+            CPU_LOGS_CLEANED_MB=$(python3 -c "import json; f=open('$metrics_file'); d=json.load(f); print(int(d.get('logs_cleaned_mb', 0)))" 2>/dev/null || echo "0")
+        elif command -v python >/dev/null 2>&1; then
+            CPU_PROCESSES_TERMINATED=$(python -c "import json; f=open('$metrics_file'); d=json.load(f); print(int(d.get('processes_terminated', 0)))" 2>/dev/null || echo "0")
+            CPU_LOGS_CLEANED_MB=$(python -c "import json; f=open('$metrics_file'); d=json.load(f); print(int(d.get('logs_cleaned_mb', 0)))" 2>/dev/null || echo "0")
+        else
+            # Fallback: parse with grep/sed
+            CPU_PROCESSES_TERMINATED=$(grep -o '"processes_terminated": [0-9]*' "$metrics_file" 2>/dev/null | grep -o '[0-9]*' | head -1 || echo "0")
+            CPU_LOGS_CLEANED_MB=$(grep -o '"logs_cleaned_mb": [0-9]*' "$metrics_file" 2>/dev/null | grep -o '[0-9]*' | head -1 || echo "0")
+        fi
+        # Ensure they are valid integers
+        if ! [[ "$CPU_PROCESSES_TERMINATED" =~ ^[0-9]+$ ]]; then
+            CPU_PROCESSES_TERMINATED=0
+        fi
+        if ! [[ "$CPU_LOGS_CLEANED_MB" =~ ^[0-9]+$ ]]; then
+            CPU_LOGS_CLEANED_MB=0
+        fi
+        rm -f "$metrics_file" 2>/dev/null || true
+    fi
 
     show_progress 3 4 "CPU Optimization Complete"
     print_info ""

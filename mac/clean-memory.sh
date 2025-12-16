@@ -505,7 +505,7 @@ safe_purge() {
         print_info "[DRY-RUN] Would execute: sudo purge"
         print_info "  This would clear inactive memory"
         # Capture stats for dry-run display
-        get_memory_stats
+        parse_vm_stat
         display_memory_stats "Memory State (Before Purge - DRY RUN)" "before"
         return 0
     fi
@@ -521,7 +521,7 @@ safe_purge() {
 
     # Capture memory stats before purge
     print_info "Capturing memory state before purge..."
-    get_memory_stats
+    parse_vm_stat
     display_memory_stats "Memory State Before Purge" "before"
 
     print_info "Executing memory purge (this may take a moment)..."
@@ -561,7 +561,33 @@ safe_purge() {
 
     # Capture memory stats after purge
     print_info "Capturing memory state after purge..."
-    get_memory_stats
+    # Save current BEFORE values before parsing new stats
+    local saved_total=$MEM_TOTAL_BEFORE
+    local saved_free=$MEM_FREE_BEFORE
+    local saved_active=$MEM_ACTIVE_BEFORE
+    local saved_inactive=$MEM_INACTIVE_BEFORE
+    local saved_wired=$MEM_WIRED_BEFORE
+    local saved_compressed=$MEM_COMPRESSED_BEFORE
+
+    # Parse new stats (this overwrites BEFORE variables)
+    parse_vm_stat
+
+    # Store new stats as AFTER
+    MEM_TOTAL_AFTER=$MEM_TOTAL_BEFORE
+    MEM_FREE_AFTER=$MEM_FREE_BEFORE
+    MEM_ACTIVE_AFTER=$MEM_ACTIVE_BEFORE
+    MEM_INACTIVE_AFTER=$MEM_INACTIVE_BEFORE
+    MEM_WIRED_AFTER=$MEM_WIRED_BEFORE
+    MEM_COMPRESSED_AFTER=$MEM_COMPRESSED_BEFORE
+
+    # Restore original BEFORE values
+    MEM_TOTAL_BEFORE=$saved_total
+    MEM_FREE_BEFORE=$saved_free
+    MEM_ACTIVE_BEFORE=$saved_active
+    MEM_INACTIVE_BEFORE=$saved_inactive
+    MEM_WIRED_BEFORE=$saved_wired
+    MEM_COMPRESSED_BEFORE=$saved_compressed
+
     display_memory_stats "Memory State After Purge" "after"
 
     # Validate purge success
@@ -989,14 +1015,33 @@ main() {
     if safe_purge; then
         # Capture memory stats after purge
         sleep 2  # Brief delay for stats to update
+
+        # Save current BEFORE values (they will be overwritten by parse_vm_stat)
+        local temp_total=$MEM_TOTAL_BEFORE
+        local temp_free=$MEM_FREE_BEFORE
+        local temp_active=$MEM_ACTIVE_BEFORE
+        local temp_inactive=$MEM_INACTIVE_BEFORE
+        local temp_wired=$MEM_WIRED_BEFORE
+        local temp_compressed=$MEM_COMPRESSED_BEFORE
+
+        # Get fresh stats (this will overwrite BEFORE variables)
         parse_vm_stat
-        # Store as "after" stats
+
+        # Store the fresh stats as AFTER
         MEM_TOTAL_AFTER=$MEM_TOTAL_BEFORE
         MEM_FREE_AFTER=$MEM_FREE_BEFORE
         MEM_ACTIVE_AFTER=$MEM_ACTIVE_BEFORE
         MEM_INACTIVE_AFTER=$MEM_INACTIVE_BEFORE
         MEM_WIRED_AFTER=$MEM_WIRED_BEFORE
         MEM_COMPRESSED_AFTER=$MEM_COMPRESSED_BEFORE
+
+        # Restore original BEFORE values
+        MEM_TOTAL_BEFORE=$temp_total
+        MEM_FREE_BEFORE=$temp_free
+        MEM_ACTIVE_BEFORE=$temp_active
+        MEM_INACTIVE_BEFORE=$temp_inactive
+        MEM_WIRED_BEFORE=$temp_wired
+        MEM_COMPRESSED_BEFORE=$temp_compressed
 
         display_memory_stats "Memory State After Purge" "after"
 
@@ -1068,6 +1113,16 @@ main() {
             echo "=========================================="
         } >> "$LOG_FILE"
     fi
+
+    # Write metrics to temporary file for parent script
+    local metrics_file="${HOME}/.os-optimize/.clean-memory-metrics.json"
+    local memory_freed=$((MEM_FREE_AFTER - MEM_FREE_BEFORE))
+    mkdir -p "$(dirname "$metrics_file")" 2>/dev/null || true
+    {
+        echo "{"
+        echo "  \"memory_freed_mb\": $memory_freed"
+        echo "}"
+    } > "$metrics_file" 2>/dev/null || true
 
     if [[ -n "$LOG_FILE" ]]; then
         print_info "Log file: $LOG_FILE"
