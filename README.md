@@ -36,8 +36,8 @@ Um kit de ferramentas de otimização de sistema multiplataforma que ajuda os us
 
 1. Clone o repositório:
 ```bash
-git clone https://github.com/yourusername/rubinho-otimize-os.git
-cd rubinho-otimize-os
+git clone https://github.com/rbinoliveira/rbin-otimize-os.git
+cd rbin-otimize-os
 ```
 
 2. Execute o script principal (a configuração é automática):
